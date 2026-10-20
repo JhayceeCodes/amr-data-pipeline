@@ -1,3 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+venv/
+
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+
+# Generated data
+data/bronze/
+data/silver/
+data/gold/
+
+# Logs and Spark artifacts
+logs/
+spark-warehouse/
+metastore_db/
+derby.log
+
+# IDE and OS files
+.vscode/
+.idea/
+.DS_Store
+
 plan.tldraw
-.vscode
-/logs
