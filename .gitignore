@@ -14,6 +14,9 @@ venv/
 .env.*
 !.env.example
 
+# Raw source datasets
+data/source/
+
 # Generated data
 data/bronze/
 data/silver/
