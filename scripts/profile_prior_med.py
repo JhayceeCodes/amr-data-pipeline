@@ -1,4 +1,3 @@
-
 from pathlib import Path
 
 import pandas as pd
@@ -9,8 +8,6 @@ DATA_PATH = Path("data/source/microbiology_cultures_prior_med.csv")
 
 def main():
     df = pd.read_csv(DATA_PATH)
-
-
 
     # Number of rows beyond the first occurrence of each exact row
     duplicate_excess = df.duplicated().sum()
@@ -26,26 +23,14 @@ def main():
         f"{distinct_rows + duplicate_excess:,} == {len(df):,}",
     )
 
-
     # Frequency of exact rows
-    exact_row_counts = (
-        df.value_counts(dropna=False)
-        .rename("occurrences")
-        .reset_index()
-    )
+    exact_row_counts = df.value_counts(dropna=False).rename("occurrences").reset_index()
 
     print("Exact-row occurrence distribution:")
-    print(
-        exact_row_counts["occurrences"]
-        .value_counts()
-        .sort_index()
-        .tail(20)
-    )
+    print(exact_row_counts["occurrences"].value_counts().sort_index().tail(20))
 
     print("\nLargest exact duplicate groups:")
     print(exact_row_counts.head(20).to_string(index=False))
-
-
 
     candidate_key = [
         "anon_id",
@@ -56,12 +41,9 @@ def main():
         "medication_category",
     ]
 
-    timestamp_counts = (
-        df.groupby(candidate_key, dropna=False)[
-            "order_time_jittered_utc"
-        ]
-        .nunique()
-    )
+    timestamp_counts = df.groupby(candidate_key, dropna=False)[
+        "order_time_jittered_utc"
+    ].nunique()
 
     conflicting_keys = timestamp_counts[timestamp_counts > 1]
 
@@ -69,9 +51,6 @@ def main():
         "Candidate-key groups with multiple timestamps:",
         f"{len(conflicting_keys):,}",
     )
-
-
-
 
     print(f"Rows: {len(df):,}")
     print(f"Columns: {len(df.columns)}")

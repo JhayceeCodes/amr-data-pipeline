@@ -10,10 +10,7 @@ def configure_logging(
     """Configure application logging to write to the console."""
     logging.basicConfig(
         level=level,
-        format=(
-            "%(asctime)s | %(levelname)s | "
-            "%(name)s | %(message)s"
-        ),
+        format=("%(asctime)s | %(levelname)s | %(name)s | %(message)s"),
         handlers=[logging.StreamHandler(sys.stdout)],
         force=True,
     )

@@ -1,4 +1,3 @@
-
 import pandas as pd
 
 path = "data/source/microbiology_cultures_implied_susceptibility.csv"
