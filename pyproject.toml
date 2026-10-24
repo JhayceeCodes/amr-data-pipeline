@@ -3,11 +3,22 @@ name = "amr-data-pipeline"
 version = "0.1.0"
 requires-python = ">=3.13"
 dependencies = [
+    "pandas>=3.1.0",
     "pyspark>=4.2.0",
 ]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/amr_pipeline"]
 
 [dependency-groups]
 dev = [
     "pytest>=9.1.1",
     "ruff>=0.17.1",
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
