@@ -36,12 +36,20 @@ def count_csv_rows(path: Path) -> int:
         return sum(1 for _ in reader)
 
 
+def relative_or_absolute_path(path: Path) -> str:
+    """Return a project-relative path when possible."""
+    try:
+        return path.relative_to(PROJECT_ROOT).as_posix()
+    except ValueError:
+        return str(path)
+
+
 def write_bronze_parquet(
     snapshot_path: Path,
     parquet_path: Path,
     expected_rows: int,
 ) -> int:
-    """Write a source-faithful, string-typed Parquet copy of a CSV snapshot."""
+    """Write a string-typed Parquet representation of a CSV snapshot."""
     with snapshot_path.open("r", encoding="utf-8-sig", newline="") as source:
         reader = csv.reader(source)
         columns = next(reader, None)
@@ -68,7 +76,6 @@ def write_bronze_parquet(
         )
 
         actual_rows = dataframe.count()
-
         if actual_rows != expected_rows:
             raise ValueError(
                 "CSV row count differs between Python and Spark: "
@@ -78,10 +85,9 @@ def write_bronze_parquet(
         dataframe.write.mode("errorifexists").parquet(str(parquet_path))
 
         parquet_rows = spark.read.parquet(str(parquet_path)).count()
-
         if parquet_rows != expected_rows:
             raise OSError(
-                f"Bronze Parquet row count mismatch: "
+                "Bronze Parquet row count mismatch: "
                 f"expected {expected_rows}, got {parquet_rows}"
             )
 
@@ -94,10 +100,10 @@ def ingest_csv_to_bronze(
     source_path: Path,
     bronze_dir: Path | None = None,
 ) -> dict[str, object]:
-    """Preserve a CSV snapshot and create a Bronze Parquet copy.
+    """Preserve a CSV snapshot and create a Bronze Parquet representation.
 
-    Existing snapshots are reused only when their checksum matches the source.
-    Existing Parquet output is never overwritten.
+    Existing snapshots are reused only when their checksums and manifest
+    metadata match the source. Existing Parquet output is never overwritten.
     """
     source_path = source_path.resolve()
 
@@ -108,11 +114,18 @@ def ingest_csv_to_bronze(
         raise ValueError(f"Expected a CSV source, got: {source_path.name}")
 
     bronze_dir = (bronze_dir or PROJECT_ROOT / "data" / "bronze").resolve()
-    bronze_dir.mkdir(parents=True, exist_ok=True)
 
-    snapshot_path = bronze_dir / source_path.name
-    manifest_path = bronze_dir / f"{source_path.stem}.manifest.json"
-    parquet_path = bronze_dir / "parquet" / source_path.stem
+    raw_dir = bronze_dir / "raw"
+    parquet_root = bronze_dir / "parquet"
+    manifests_dir = bronze_dir / "manifests"
+
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    parquet_root.mkdir(parents=True, exist_ok=True)
+    manifests_dir.mkdir(parents=True, exist_ok=True)
+
+    snapshot_path = raw_dir / source_path.name
+    parquet_path = parquet_root / source_path.stem
+    manifest_path = manifests_dir / f"{source_path.stem}.manifest.json"
 
     source_checksum = calculate_sha256(source_path)
     source_row_count = count_csv_rows(source_path)
@@ -134,14 +147,27 @@ def ingest_csv_to_bronze(
                 "It will not be overwritten."
             )
 
+        if count_csv_rows(snapshot_path) != source_row_count:
+            raise ValueError("Existing snapshot row count differs from source.")
+
         with manifest_path.open(encoding="utf-8") as source:
             manifest = json.load(source)
 
         if manifest.get("source_sha256") != source_checksum:
             raise ValueError("Existing manifest checksum does not match source.")
 
+        if manifest.get("snapshot_sha256") != source_checksum:
+            raise ValueError("Manifest snapshot checksum does not match source.")
+
         if manifest.get("source_row_count") != source_row_count:
-            raise ValueError("Existing manifest row count does not match source.")
+            raise ValueError("Manifest source row count does not match source.")
+
+        if manifest.get("snapshot_row_count") != source_row_count:
+            raise ValueError("Manifest snapshot row count does not match source.")
+
+        if manifest.get("snapshot_path") != relative_or_absolute_path(snapshot_path):
+            raise ValueError("Manifest snapshot path does not match expected path.")
+
     else:
         shutil.copy2(source_path, snapshot_path)
 
@@ -149,14 +175,13 @@ def ingest_csv_to_bronze(
             snapshot_path.unlink(missing_ok=True)
             raise OSError("Bronze snapshot checksum does not match source.")
 
-        run_id = str(uuid.uuid4())
-        ingestion_timestamp = datetime.now(UTC).isoformat()
-
         manifest = {
             "source_filename": source_path.name,
+            "source_path": relative_or_absolute_path(source_path),
             "snapshot_filename": snapshot_path.name,
-            "ingestion_timestamp_utc": ingestion_timestamp,
-            "pipeline_run_id": run_id,
+            "snapshot_path": relative_or_absolute_path(snapshot_path),
+            "ingestion_timestamp_utc": datetime.now(UTC).isoformat(),
+            "pipeline_run_id": str(uuid.uuid4()),
             "source_sha256": source_checksum,
             "snapshot_sha256": calculate_sha256(snapshot_path),
             "source_size_bytes": source_size_bytes,
@@ -165,9 +190,10 @@ def ingest_csv_to_bronze(
             "ingestion_status": "in_progress",
         }
 
+    parquet_created = not parquet_path.exists()
+
     try:
-        if not parquet_path.exists():
-            parquet_path.parent.mkdir(parents=True, exist_ok=True)
+        if parquet_created:
             parquet_rows = write_bronze_parquet(
                 snapshot_path,
                 parquet_path,
@@ -180,24 +206,38 @@ def ingest_csv_to_bronze(
             finally:
                 spark.stop()
 
+            if parquet_rows != source_row_count:
+                raise ValueError(
+                    "Existing Parquet row count does not match source: "
+                    f"{parquet_rows} != {source_row_count}"
+                )
+
         manifest.update(
             {
-                "parquet_path": str(parquet_path.relative_to(PROJECT_ROOT)),
+                "parquet_path": relative_or_absolute_path(parquet_path),
                 "parquet_row_count": parquet_rows,
                 "ingestion_status": "success",
             }
         )
 
-        temporary_manifest = manifest_path.with_suffix(".manifest.tmp")
-        with temporary_manifest.open("w", encoding="utf-8") as output:
-            json.dump(manifest, output, indent=2)
-            output.write("\n")
+        temporary_manifest = manifest_path.with_name(f".{manifest_path.name}.tmp")
 
-        temporary_manifest.replace(manifest_path)
+        try:
+            with temporary_manifest.open("w", encoding="utf-8") as output:
+                json.dump(manifest, output, indent=2)
+                output.write("\n")
+
+            temporary_manifest.replace(manifest_path)
+        finally:
+            temporary_manifest.unlink(missing_ok=True)
 
     except Exception:
+        if parquet_created:
+            shutil.rmtree(parquet_path, ignore_errors=True)
+
         if not snapshot_exists:
             snapshot_path.unlink(missing_ok=True)
+
         raise
 
     logger.info(
