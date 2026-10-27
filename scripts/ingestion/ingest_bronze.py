@@ -38,7 +38,12 @@ def main() -> None:
         try:
             logger.info("Starting Bronze ingestion: %s", source_path.name)
             manifest = ingest_csv_to_bronze(source_path)
-            logger.info("Ingestion complete: %s", manifest)
+            logger.info(
+                "Ingestion complete | dataset=%s | rows=%d | parquet_rows=%d",
+                manifest["source_filename"],
+                manifest["source_row_count"],
+                manifest["parquet_row_count"],
+            )
         except Exception:
             logger.exception("Bronze ingestion failed: %s", source_path.name)
             failures.append(source_path.name)
