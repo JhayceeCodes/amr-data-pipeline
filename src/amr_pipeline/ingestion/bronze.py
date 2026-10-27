@@ -1,4 +1,3 @@
-
 """Bronze ingestion for source CSV snapshots."""
 
 import csv
@@ -43,9 +42,7 @@ def write_bronze_parquet(
     expected_rows: int,
 ) -> int:
     """Write a source-faithful, string-typed Parquet copy of a CSV snapshot."""
-    with snapshot_path.open(
-        "r", encoding="utf-8-sig", newline=""
-    ) as source:
+    with snapshot_path.open("r", encoding="utf-8-sig", newline="") as source:
         reader = csv.reader(source)
         columns = next(reader, None)
 
@@ -63,8 +60,7 @@ def write_bronze_parquet(
 
     try:
         dataframe = (
-            spark.read
-            .option("header", True)
+            spark.read.option("header", True)
             .option("inferSchema", False)
             .option("mode", "FAILFAST")
             .schema(schema)
@@ -111,16 +107,12 @@ def ingest_csv_to_bronze(
     if source_path.suffix.lower() != ".csv":
         raise ValueError(f"Expected a CSV source, got: {source_path.name}")
 
-    bronze_dir = (
-        bronze_dir or PROJECT_ROOT / "data" / "bronze"
-    ).resolve()
+    bronze_dir = (bronze_dir or PROJECT_ROOT / "data" / "bronze").resolve()
     bronze_dir.mkdir(parents=True, exist_ok=True)
 
     snapshot_path = bronze_dir / source_path.name
     manifest_path = bronze_dir / f"{source_path.stem}.manifest.json"
-    parquet_path = (
-        bronze_dir / "parquet" / source_path.stem
-    )
+    parquet_path = bronze_dir / "parquet" / source_path.stem
 
     source_checksum = calculate_sha256(source_path)
     source_row_count = count_csv_rows(source_path)
@@ -182,16 +174,11 @@ def ingest_csv_to_bronze(
                 source_row_count,
             )
         else:
-            parquet_rows = __import__(
-                "pyspark.sql", fromlist=["SparkSession"]
-            ).SparkSession.builder.getOrCreate().read.parquet(
-                str(parquet_path)
-            ).count()
-
-            if parquet_rows != source_row_count:
-                raise ValueError(
-                    "Existing Bronze Parquet row count does not match source."
-                )
+            spark = create_spark_session("AMR-Bronze-Validation")
+            try:
+                parquet_rows = spark.read.parquet(str(parquet_path)).count()
+            finally:
+                spark.stop()
 
         manifest.update(
             {
