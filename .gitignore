@@ -34,3 +34,5 @@ derby.log
 .DS_Store
 
 plan.tldraw
+
+check_parquet.ipynb
