@@ -8,3 +8,6 @@ BRONZE_DIR = PROJECT_ROOT / "data" / "bronze"
 SILVER_DIR = PROJECT_ROOT / "data" / "silver"
 GOLD_DIR = PROJECT_ROOT / "data" / "gold"
 LOG_DIR = PROJECT_ROOT / "logs"
+
+SILVER_QUARANTINE_DIR = SILVER_DIR / "quarantine"
+SILVER_RUNS_DIR = SILVER_DIR / "runs"

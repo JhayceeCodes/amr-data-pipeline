@@ -8,8 +8,8 @@ from amr_pipeline.config import BRONZE_DIR
 
 
 def main() -> None:
-    filename = sys.argv[1] if len(sys.argv) > 1 else (
-        "microbiology_cultures_cohort.csv"
+    filename = (
+        sys.argv[1] if len(sys.argv) > 1 else ("microbiology_cultures_cohort.csv")
     )
     path = BRONZE_DIR / "raw" / filename
 

@@ -5,7 +5,6 @@ from pyspark.sql import functions as F
 from amr_pipeline.config import BRONZE_DIR
 from amr_pipeline.spark import create_spark_session
 
-
 SOURCE = BRONZE_DIR / "parquet" / "microbiology_cultures_cohort"
 
 ORDER_ID = "order_proc_id_coded"
@@ -78,9 +77,12 @@ def main() -> None:
             inconsistent = per_order.filter(F.col(distinct_col) > 1)
             inconsistent_count = inconsistent.count()
 
-            missing_rows = per_order.agg(
-                F.sum(f"{label}_missing_rows").alias("missing_rows")
-            ).first()["missing_rows"] or 0
+            missing_rows = (
+                per_order.agg(
+                    F.sum(f"{label}_missing_rows").alias("missing_rows")
+                ).first()["missing_rows"]
+                or 0
+            )
 
             orders_with_missing = per_order.filter(
                 F.col(f"{label}_missing_rows") > 0
