@@ -36,3 +36,4 @@ derby.log
 plan.tldraw
 
 check_parquet.ipynb
+DQ_checks.py
