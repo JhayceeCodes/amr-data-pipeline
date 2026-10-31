@@ -1,11 +1,11 @@
 """Tests for the Silver prior medication transformation."""
 
-import pytest
 from pyspark.sql import functions as F
 from pyspark.sql import types as T
 
-from amr_pipeline.transformations.silver.prior_medication import transform_prior_medication
-
+from amr_pipeline.transformations.silver.prior_medication import (
+    transform_prior_medication,
+)
 
 SCHEMA = T.StructType(
     [
@@ -139,7 +139,6 @@ def prior_medication_rows():
     ]
 
 
-
 def test_exact_duplicate_rows_return_one_copy(spark, prior_medication_rows):
     """Test that exact duplicate rows are reduced to one copy."""
     source = spark.createDataFrame(prior_medication_rows, schema=SCHEMA)
@@ -161,9 +160,9 @@ def test_exact_duplicate_rows_return_one_copy(spark, prior_medication_rows):
     assert metrics["output_rows"] == 7
 
 
-
-
-def test_same_identifiers_different_medication_retain_both(spark, prior_medication_rows):
+def test_same_identifiers_different_medication_retain_both(
+    spark, prior_medication_rows
+):
     """Test that records with identical identifiers but different medications remain distinct."""
     source = spark.createDataFrame(prior_medication_rows, schema=SCHEMA)
 
@@ -178,7 +177,6 @@ def test_same_identifiers_different_medication_retain_both(spark, prior_medicati
     assert copies.count() == 2
     assert copies.filter(F.col("medication") == "Ciprofloxacin").count() == 1
     assert copies.filter(F.col("medication") == "Amoxicillin").count() == 1
-
 
 
 def test_invalid_required_fields_are_quarantined(spark, prior_medication_rows):
@@ -202,7 +200,6 @@ def test_invalid_required_fields_are_quarantined(spark, prior_medication_rows):
     }
 
 
-
 def test_missing_optional_fields_are_retained(spark, prior_medication_rows):
     """Test that missing optional medication fields do not cause quarantine."""
     source = spark.createDataFrame(prior_medication_rows, schema=SCHEMA)
@@ -215,9 +212,10 @@ def test_missing_optional_fields_are_retained(spark, prior_medication_rows):
     assert silver.filter(F.col("anon_id") == "100004").count() == 1
 
     # None of these records should be quarantined.
-    assert quarantine.filter(
-        F.col("anon_id").isin("100002", "100003", "100004")
-    ).count() == 0
+    assert (
+        quarantine.filter(F.col("anon_id").isin("100002", "100003", "100004")).count()
+        == 0
+    )
 
 
 def test_null_placeholders_are_converted_to_sql_null(spark, prior_medication_rows):
@@ -246,9 +244,7 @@ def test_null_placeholders_are_converted_to_sql_null(spark, prior_medication_row
     assert record["med_category"] is None
 
     assert metrics["null_placeholders_converted.medication_name"] == 1
-    assert metrics[
-        "null_placeholders_converted.medication_time_to_culturetime"
-    ] == 1
+    assert metrics["null_placeholders_converted.medication_time_to_culturetime"] == 1
     assert metrics["null_placeholders_converted.medication_category"] == 1
 
 
@@ -259,8 +255,7 @@ def test_medication_interval_is_parsed(spark, prior_medication_rows):
     silver, _, _ = transform_prior_medication(source)
 
     record = silver.filter(
-        (F.col("anon_id") == "100001")
-        & (F.col("medication") == "Ciprofloxacin")
+        (F.col("anon_id") == "100001") & (F.col("medication") == "Ciprofloxacin")
     ).first()
 
     assert record["days_since_prior_medication"] == pytest.approx(5.5)
@@ -316,5 +311,3 @@ def test_row_reconciliation_metrics(spark, prior_medication_rows):
         + metrics["output_rows"]
         + metrics["quarantined_rows"]
     )
-
-

@@ -3,7 +3,6 @@
 from pyspark.sql import DataFrame
 from pyspark.sql import functions as F
 
-
 SOURCE_TO_SILVER = {
     "anon_id": "anon_id",
     "pat_enc_csn_id_coded": "encounter_id",
@@ -73,9 +72,7 @@ def transform_prior_medication(
     }
 
     placeholder_metrics = {
-        column: count
-        for column, count in placeholder_metrics.items()
-        if count > 0
+        column: count for column, count in placeholder_metrics.items() if count > 0
     }
 
     # Retain original source values for rejected records.
@@ -109,9 +106,7 @@ def transform_prior_medication(
         )
         .withColumn(
             DERIVED_COLUMNS["medication_time_to_culturetime"],
-            F.expr(
-                "try_cast(medication_time_to_culturetime AS DOUBLE)"
-            ),
+            F.expr("try_cast(medication_time_to_culturetime AS DOUBLE)"),
         )
     )
 
@@ -154,15 +149,9 @@ def transform_prior_medication(
     )
 
     # Preserve original source values in quarantine.
-    quarantine = (
-        assessed.filter(F.size(F.col("rejection_reasons")) > 0)
-        .select(
-            *[
-                F.col(f"_raw_{column}").alias(column)
-                for column in deduplicated.columns
-            ],
-            F.col("rejection_reasons"),
-        )
+    quarantine = assessed.filter(F.size(F.col("rejection_reasons")) > 0).select(
+        *[F.col(f"_raw_{column}").alias(column) for column in deduplicated.columns],
+        F.col("rejection_reasons"),
     )
 
     # Dynamically construct the Silver output columns.
@@ -179,22 +168,17 @@ def transform_prior_medication(
         if source_column in COLUMN_CASTS:
             expression = expression.cast(COLUMN_CASTS[source_column])
 
-        silver_columns.append(
-            expression.alias(silver_column)
-        )
+        silver_columns.append(expression.alias(silver_column))
 
-    silver = (
-        assessed.filter(F.size(F.col("rejection_reasons")) == 0)
-        .select(*silver_columns)
+    silver = assessed.filter(F.size(F.col("rejection_reasons")) == 0).select(
+        *silver_columns
     )
 
     # Reconcile original input, duplicates, Silver, and quarantine.
     output_rows = silver.count()
     quarantined_rows = quarantine.count()
 
-    if input_rows != (
-        duplicate_rows_removed + output_rows + quarantined_rows
-    ):
+    if input_rows != (duplicate_rows_removed + output_rows + quarantined_rows):
         raise RuntimeError(
             "Prior medication row reconciliation failed: "
             f"input={input_rows}, "
@@ -212,9 +196,7 @@ def transform_prior_medication(
         "quarantined_rows": quarantined_rows,
         "invalid_medication_intervals": invalid_interval_count,
         "negative_medication_intervals": negative_interval_count,
-        "null_placeholders_converted_total": sum(
-            placeholder_metrics.values()
-        ),
+        "null_placeholders_converted_total": sum(placeholder_metrics.values()),
         **{
             f"null_placeholders_converted.{column}": count
             for column, count in placeholder_metrics.items()

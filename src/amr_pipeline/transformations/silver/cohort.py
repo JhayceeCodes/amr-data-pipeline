@@ -3,7 +3,6 @@
 from pyspark.sql import DataFrame
 from pyspark.sql import functions as F
 
-
 SOURCE_TO_SILVER = {
     "anon_id": "anon_id",
     "pat_enc_csn_id_coded": "encounter_id",
@@ -60,8 +59,7 @@ def transform_cohort(
 
     if missing_mapped_columns:
         raise ValueError(
-            "Bronze cohort is missing mapped columns: "
-            f"{sorted(missing_mapped_columns)}"
+            f"Bronze cohort is missing mapped columns: {sorted(missing_mapped_columns)}"
         )
 
     # Capture exact placeholder counts before replacing them.
@@ -71,9 +69,7 @@ def transform_cohort(
     }
 
     placeholder_metrics = {
-        column: count
-        for column, count in placeholder_metrics.items()
-        if count > 0
+        column: count for column, count in placeholder_metrics.items() if count > 0
     }
 
     # Retain original source values for rejected records.
@@ -151,13 +147,8 @@ def transform_cohort(
     )
 
     # Preserve original source values in quarantine.
-    quarantine = assessed.filter(
-        F.size(F.col("rejection_reasons")) > 0
-    ).select(
-        *[
-            F.col(f"_raw_{column}").alias(column)
-            for column in source.columns
-        ],
+    quarantine = assessed.filter(F.size(F.col("rejection_reasons")) > 0).select(
+        *[F.col(f"_raw_{column}").alias(column) for column in source.columns],
         F.col("rejection_reasons"),
     )
 
@@ -175,13 +166,10 @@ def transform_cohort(
         if source_column in COLUMN_CASTS:
             expression = expression.cast(COLUMN_CASTS[source_column])
 
-        silver_columns.append(
-            expression.alias(silver_column)
-        )
+        silver_columns.append(expression.alias(silver_column))
 
-    silver = (
-        assessed.filter(F.size(F.col("rejection_reasons")) == 0)
-        .select(*silver_columns)
+    silver = assessed.filter(F.size(F.col("rejection_reasons")) == 0).select(
+        *silver_columns
     )
 
     # Reconcile input, Silver, and quarantine row counts.

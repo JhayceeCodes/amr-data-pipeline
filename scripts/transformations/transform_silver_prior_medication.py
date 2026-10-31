@@ -59,9 +59,7 @@ def run_transformation(spark: SparkSession) -> dict[str, object]:
             )
 
     if staging_path.exists():
-        raise FileExistsError(
-            f"Run staging directory already exists: {staging_path}"
-        )
+        raise FileExistsError(f"Run staging directory already exists: {staging_path}")
 
     logger.info("Reading Bronze prior medication from %s", SOURCE_PATH)
     source = spark.read.parquet(str(SOURCE_PATH))
@@ -96,15 +94,11 @@ def run_transformation(spark: SparkSession) -> dict[str, object]:
         "Writing staged quarantine records to %s",
         staged_quarantine_path,
     )
-    quarantine.write.mode("errorifexists").parquet(
-        str(staged_quarantine_path)
-    )
+    quarantine.write.mode("errorifexists").parquet(str(staged_quarantine_path))
 
     # Verify persisted counts before publishing either dataset.
     silver_written = spark.read.parquet(str(staged_silver_path)).count()
-    quarantine_written = (
-        spark.read.parquet(str(staged_quarantine_path)).count()
-    )
+    quarantine_written = spark.read.parquet(str(staged_quarantine_path)).count()
 
     if silver_written != output_rows:
         raise RuntimeError(
