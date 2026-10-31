@@ -8,7 +8,6 @@ from amr_pipeline.transformations.silver.prior_infecting_organism import (
     transform_prior_infecting_organisms,
 )
 
-
 SCHEMA = T.StructType(
     [
         T.StructField("anon_id", T.StringType(), True),
@@ -184,18 +183,13 @@ def test_transforms_valid_and_invalid_records(
     assert metrics["invalid_intervals"] == 1
     assert metrics["negative_intervals"] == 1
 
-    assert (
-        metrics["output_rows"] + metrics["quarantined_rows"]
-        == metrics["input_rows"]
-    )
+    assert metrics["output_rows"] + metrics["quarantined_rows"] == metrics["input_rows"]
 
 
 def test_output_schema_has_expected_types(
     prior_infecting_organism_source,
 ):
-    silver, _, _ = transform_prior_infecting_organisms(
-        prior_infecting_organism_source
-    )
+    silver, _, _ = transform_prior_infecting_organisms(prior_infecting_organism_source)
 
     expected_schema = [
         ("anon_id", T.StringType()),
@@ -206,9 +200,7 @@ def test_output_schema_has_expected_types(
         ("days_since_prior_infection", T.IntegerType()),
     ]
 
-    actual_schema = [
-        (field.name, field.dataType) for field in silver.schema.fields
-    ]
+    actual_schema = [(field.name, field.dataType) for field in silver.schema.fields]
 
     assert actual_schema == expected_schema
 
@@ -216,9 +208,7 @@ def test_output_schema_has_expected_types(
 def test_casts_identifiers_timestamp_and_interval(
     prior_infecting_organism_source,
 ):
-    silver, _, _ = transform_prior_infecting_organisms(
-        prior_infecting_organism_source
-    )
+    silver, _, _ = transform_prior_infecting_organisms(prior_infecting_organism_source)
 
     record = silver.filter(F.col("prior_organism") == "Proteus").first()
 
@@ -233,9 +223,7 @@ def test_casts_identifiers_timestamp_and_interval(
 def test_preserves_distinct_intervals_for_same_organism(
     prior_infecting_organism_source,
 ):
-    silver, _, _ = transform_prior_infecting_organisms(
-        prior_infecting_organism_source
-    )
+    silver, _, _ = transform_prior_infecting_organisms(prior_infecting_organism_source)
 
     intervals = {
         row["days_since_prior_infection"]
@@ -256,9 +244,7 @@ def test_retains_negative_interval_and_tracks_metric(
         prior_infecting_organism_source
     )
 
-    record = silver.filter(
-        F.col("prior_organism") == "Escherichia"
-    ).first()
+    record = silver.filter(F.col("prior_organism") == "Escherichia").first()
 
     assert record is not None
     assert record["days_since_prior_infection"] == -828
@@ -272,9 +258,7 @@ def test_retains_invalid_interval_as_null_and_tracks_metric(
         prior_infecting_organism_source
     )
 
-    record = silver.filter(
-        F.col("anon_id") == "JC862469"
-    ).first()
+    record = silver.filter(F.col("anon_id") == "JC862469").first()
 
     assert record is not None
     assert record["days_since_prior_infection"] is None
@@ -288,9 +272,7 @@ def test_retains_missing_optional_interval(
         prior_infecting_organism_source
     )
 
-    record = silver.filter(
-        F.col("anon_id") == "JC862470"
-    ).first()
+    record = silver.filter(F.col("anon_id") == "JC862470").first()
 
     assert record is not None
     assert record["days_since_prior_infection"] is None
@@ -306,9 +288,7 @@ def test_retains_zero_interval_without_negative_metric(
         prior_infecting_organism_source
     )
 
-    record = silver.filter(
-        F.col("prior_organism") == "Citrobacter"
-    ).first()
+    record = silver.filter(F.col("prior_organism") == "Citrobacter").first()
 
     assert record is not None
     assert record["days_since_prior_infection"] == 0
@@ -323,17 +303,13 @@ def test_converts_literal_null_placeholders(
     )
 
     # Optional interval placeholder becomes SQL NULL but the row is retained.
-    optional_record = silver.filter(
-        F.col("anon_id") == "JC862471"
-    ).first()
+    optional_record = silver.filter(F.col("anon_id") == "JC862471").first()
 
     assert optional_record is not None
     assert optional_record["days_since_prior_infection"] is None
 
     # Required organism placeholder becomes SQL NULL and is quarantined.
-    required_record = quarantine.filter(
-        F.col("anon_id") == "JC862472"
-    ).first()
+    required_record = quarantine.filter(F.col("anon_id") == "JC862472").first()
 
     assert required_record is not None
     assert required_record["prior_organism"] == "Null"
@@ -348,9 +324,7 @@ def test_quarantines_missing_prior_organism(
         prior_infecting_organism_source
     )
 
-    record = quarantine.filter(
-        F.col("anon_id") == "JC862468"
-    ).first()
+    record = quarantine.filter(F.col("anon_id") == "JC862468").first()
 
     assert record is not None
     assert "missing_prior_organism" in record["rejection_reasons"]
@@ -363,9 +337,7 @@ def test_quarantines_missing_patient_id(
         prior_infecting_organism_source
     )
 
-    record = quarantine.filter(
-        F.col("order_proc_id_coded") == "775667820"
-    ).first()
+    record = quarantine.filter(F.col("order_proc_id_coded") == "775667820").first()
 
     assert record is not None
     assert "missing_anon_id" in record["rejection_reasons"]
@@ -378,9 +350,7 @@ def test_quarantines_invalid_encounter_id(
         prior_infecting_organism_source
     )
 
-    record = quarantine.filter(
-        F.col("anon_id") == "JC862465"
-    ).first()
+    record = quarantine.filter(F.col("anon_id") == "JC862465").first()
 
     assert record is not None
     assert "invalid_or_missing_encounter_id" in record["rejection_reasons"]
@@ -393,9 +363,7 @@ def test_quarantines_invalid_culture_order_id(
         prior_infecting_organism_source
     )
 
-    record = quarantine.filter(
-        F.col("anon_id") == "JC862466"
-    ).first()
+    record = quarantine.filter(F.col("anon_id") == "JC862466").first()
 
     assert record is not None
     assert "invalid_or_missing_culture_order_id" in record["rejection_reasons"]
@@ -408,9 +376,7 @@ def test_quarantines_invalid_timestamp(
         prior_infecting_organism_source
     )
 
-    record = quarantine.filter(
-        F.col("anon_id") == "JC862467"
-    ).first()
+    record = quarantine.filter(F.col("anon_id") == "JC862467").first()
 
     assert record is not None
     assert "invalid_or_missing_culture_time" in record["rejection_reasons"]
@@ -423,9 +389,7 @@ def test_records_multiple_rejection_reasons(
         prior_infecting_organism_source
     )
 
-    record = quarantine.filter(
-        F.col("order_proc_id_coded") == "775667830"
-    ).first()
+    record = quarantine.filter(F.col("order_proc_id_coded") == "775667830").first()
 
     assert record is not None
     assert "missing_anon_id" in record["rejection_reasons"]
@@ -439,9 +403,7 @@ def test_preserves_original_values_in_quarantine(
         prior_infecting_organism_source
     )
 
-    record = quarantine.filter(
-        F.col("anon_id") == "JC862465"
-    ).first()
+    record = quarantine.filter(F.col("anon_id") == "JC862465").first()
 
     assert record is not None
     assert record["pat_enc_csn_id_coded"] == "invalid"
@@ -450,9 +412,7 @@ def test_preserves_original_values_in_quarantine(
 def test_fails_when_required_source_column_is_missing(
     prior_infecting_organism_source,
 ):
-    source_without_organism = prior_infecting_organism_source.drop(
-        "prior_organism"
-    )
+    source_without_organism = prior_infecting_organism_source.drop("prior_organism")
 
     with pytest.raises((ValueError, KeyError)):
         transform_prior_infecting_organisms(source_without_organism)

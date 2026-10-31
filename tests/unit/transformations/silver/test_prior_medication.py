@@ -166,7 +166,7 @@ def test_same_identifiers_different_medication_retain_both(
     """Test that records with identical identifiers but different medications remain distinct."""
     source = spark.createDataFrame(prior_medication_rows, schema=SCHEMA)
 
-    silver, _, metrics = transform_prior_medication(source)
+    silver, _, _ = transform_prior_medication(source)
 
     copies = silver.filter(
         (F.col("anon_id") == "100001")
