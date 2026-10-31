@@ -1,4 +1,3 @@
-
 """Silver transformation for the microbiology prior infecting organisms."""
 
 from pyspark.sql import DataFrame
@@ -12,9 +11,7 @@ SOURCE_TO_SILVER = {
     "order_proc_id_coded": "culture_order_id",
     "order_time_jittered_utc": "culture_time",
     "prior_organism": "prior_organism",
-    "prior_infecting_organism_days_to_culutre": (
-        "days_since_prior_infection"
-    ),
+    "prior_infecting_organism_days_to_culutre": ("days_since_prior_infection"),
 }
 
 REQUIRED_COLUMNS = {
@@ -29,9 +26,7 @@ DERIVED_COLUMNS = {
     "pat_enc_csn_id_coded": "_encounter_id",
     "order_proc_id_coded": "_culture_order_id",
     "order_time_jittered_utc": "_culture_time",
-    "prior_infecting_organism_days_to_culutre": (
-        "_days_since_prior_infection"
-    ),
+    "prior_infecting_organism_days_to_culutre": ("_days_since_prior_infection"),
 }
 
 
@@ -49,10 +44,7 @@ def transform_prior_infecting_organisms(
     missing_columns = REQUIRED_COLUMNS - set(source.columns)
 
     if missing_columns:
-        raise ValueError(
-            "Missing required source columns: "
-            f"{sorted(missing_columns)}"
-        )
+        raise ValueError(f"Missing required source columns: {sorted(missing_columns)}")
 
     interval_col = "prior_infecting_organism_days_to_culutre"
 
@@ -62,33 +54,21 @@ def transform_prior_infecting_organisms(
         F.monotonically_increasing_id(),
     )
 
-    source_columns = [
-        column for column in source.columns
-        if column != "_source_row_id"
-    ]
+    source_columns = [column for column in source.columns if column != "_source_row_id"]
 
     # Count exact "Null" placeholders before normalization.
     placeholder_metrics = [
-        F.sum(
-            F.when(F.col(column) == "Null", 1).otherwise(0)
-        ).alias(column)
+        F.sum(F.when(F.col(column) == "Null", 1).otherwise(0)).alias(column)
         for column in source_columns
     ]
 
-    placeholder_counts = (
-        source.agg(*placeholder_metrics)
-        .first()
-        .asDict()
-    )
+    placeholder_counts = source.agg(*placeholder_metrics).first().asDict()
 
     null_placeholders_converted = {
-        column: int(placeholder_counts[column] or 0)
-        for column in source_columns
+        column: int(placeholder_counts[column] or 0) for column in source_columns
     }
 
-    null_placeholders_converted_total = sum(
-        null_placeholders_converted.values()
-    )
+    null_placeholders_converted_total = sum(null_placeholders_converted.values())
 
     # Preserve original values for quarantine.
     raw_source = source
@@ -107,18 +87,13 @@ def transform_prior_infecting_organisms(
 
     # Cast identifiers, timestamp, and interval.
     typed = (
-        normalized
-        .withColumn(
+        normalized.withColumn(
             "_encounter_id",
-            F.expr(
-                "try_cast(`pat_enc_csn_id_coded` AS BIGINT)"
-            ),
+            F.expr("try_cast(`pat_enc_csn_id_coded` AS BIGINT)"),
         )
         .withColumn(
             "_culture_order_id",
-            F.expr(
-                "try_cast(`order_proc_id_coded` AS BIGINT)"
-            ),
+            F.expr("try_cast(`order_proc_id_coded` AS BIGINT)"),
         )
         .withColumn(
             "_culture_time",
@@ -129,9 +104,7 @@ def transform_prior_infecting_organisms(
         )
         .withColumn(
             "_days_since_prior_infection",
-            F.expr(
-                f"try_cast(`{interval_col}` AS INT)"
-            ),
+            F.expr(f"try_cast(`{interval_col}` AS INT)"),
         )
     )
 
@@ -185,65 +158,45 @@ def transform_prior_infecting_organisms(
     )
 
     # Retrieve original source values for rejected rows.
-    quarantine = (
-        raw_source.join(
-            rejected_records.select(
-                "_source_row_id",
-                "rejection_reasons",
-            ),
-            on="_source_row_id",
-            how="inner",
-        )
-        .select(
-            *[F.col(column) for column in source_columns],
+    quarantine = raw_source.join(
+        rejected_records.select(
+            "_source_row_id",
             "rejection_reasons",
-        )
+        ),
+        on="_source_row_id",
+        how="inner",
+    ).select(
+        *[F.col(column) for column in source_columns],
+        "rejection_reasons",
     )
 
     # Calculate interval quality metrics.
     invalid_interval_condition = (
-        F.col(interval_col).isNotNull()
-        & F.col("_days_since_prior_infection").isNull()
+        F.col(interval_col).isNotNull() & F.col("_days_since_prior_infection").isNull()
     )
 
-    negative_interval_condition = (
-        F.col("_days_since_prior_infection") < 0
-    )
+    negative_interval_condition = F.col("_days_since_prior_infection") < 0
 
     metrics_row = validated.agg(
         F.count("*").alias("input_rows"),
-        F.sum(
-            F.when(valid_condition, 1).otherwise(0)
-        ).alias("output_rows"),
-        F.sum(
-            F.when(~valid_condition, 1).otherwise(0)
-        ).alias("quarantined_rows"),
-        F.sum(
-            F.when(invalid_interval_condition, 1).otherwise(0)
-        ).alias("invalid_intervals"),
-        F.sum(
-            F.when(negative_interval_condition, 1).otherwise(0)
-        ).alias("negative_intervals"),
+        F.sum(F.when(valid_condition, 1).otherwise(0)).alias("output_rows"),
+        F.sum(F.when(~valid_condition, 1).otherwise(0)).alias("quarantined_rows"),
+        F.sum(F.when(invalid_interval_condition, 1).otherwise(0)).alias(
+            "invalid_intervals"
+        ),
+        F.sum(F.when(negative_interval_condition, 1).otherwise(0)).alias(
+            "negative_intervals"
+        ),
     ).first()
 
     metrics = {
         "input_rows": int(metrics_row["input_rows"] or 0),
         "output_rows": int(metrics_row["output_rows"] or 0),
-        "quarantined_rows": int(
-            metrics_row["quarantined_rows"] or 0
-        ),
-        "invalid_intervals": int(
-            metrics_row["invalid_intervals"] or 0
-        ),
-        "negative_intervals": int(
-            metrics_row["negative_intervals"] or 0
-        ),
-        "null_placeholders_converted_total": (
-            null_placeholders_converted_total
-        ),
-        "null_placeholders_converted": (
-            null_placeholders_converted
-        ),
+        "quarantined_rows": int(metrics_row["quarantined_rows"] or 0),
+        "invalid_intervals": int(metrics_row["invalid_intervals"] or 0),
+        "negative_intervals": int(metrics_row["negative_intervals"] or 0),
+        "null_placeholders_converted_total": (null_placeholders_converted_total),
+        "null_placeholders_converted": (null_placeholders_converted),
     }
 
     return silver, quarantine, metrics
