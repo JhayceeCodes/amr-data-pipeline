@@ -3,6 +3,7 @@
 from pyspark.sql import DataFrame
 from pyspark.sql import functions as F
 
+
 SOURCE_TO_SILVER = {
     "anon_id": "anon_id",
     "pat_enc_csn_id_coded": "encounter_id",
@@ -26,15 +27,41 @@ REQUIRED_COLUMNS = {
     "was_positive",
 }
 
+# Source fields that require parsing or type conversion.
+DERIVED_COLUMNS = {
+    "pat_enc_csn_id_coded": "_encounter_id",
+    "order_proc_id_coded": "_culture_order_id",
+    "order_time_jittered_utc": "_culture_time",
+    "was_positive": "_was_positive",
+}
+
+# Explicit output types for fields that need casting.
+COLUMN_CASTS = {
+    "anon_id": "string",
+}
+
 
 def transform_cohort(
     source: DataFrame,
 ) -> tuple[DataFrame, DataFrame, dict[str, int]]:
     """Transform the Bronze cohort into clean Silver and quarantine rows."""
+
+    # Validate the source schema.
     missing_columns = REQUIRED_COLUMNS - set(source.columns)
+
     if missing_columns:
         raise ValueError(
             f"Bronze cohort is missing required columns: {sorted(missing_columns)}"
+        )
+
+    # Validate that every mapped source column exists.
+    mapped_columns = set(SOURCE_TO_SILVER)
+    missing_mapped_columns = mapped_columns - set(source.columns)
+
+    if missing_mapped_columns:
+        raise ValueError(
+            "Bronze cohort is missing mapped columns: "
+            f"{sorted(missing_mapped_columns)}"
         )
 
     # Capture exact placeholder counts before replacing them.
@@ -42,12 +69,16 @@ def transform_cohort(
         column: source.filter(F.col(column) == "Null").count()
         for column in source.columns
     }
+
     placeholder_metrics = {
-        column: count for column, count in placeholder_metrics.items() if count > 0
+        column: count
+        for column, count in placeholder_metrics.items()
+        if count > 0
     }
 
     # Retain original source values for rejected records.
     cleaned = source
+
     for column in source.columns:
         cleaned = cleaned.withColumn(
             f"_raw_{column}",
@@ -61,33 +92,34 @@ def transform_cohort(
             F.when(F.col(column) == "Null", F.lit(None)).otherwise(F.col(column)),
         )
 
-    # Parse required identifiers without allowing malformed values to
-    # abort the entire Spark job.
+    # Parse identifiers.
     cleaned = (
         cleaned.withColumn(
-            "_encounter_id",
+            DERIVED_COLUMNS["pat_enc_csn_id_coded"],
             F.expr("try_cast(pat_enc_csn_id_coded AS BIGINT)"),
         )
         .withColumn(
-            "_culture_order_id",
+            DERIVED_COLUMNS["order_proc_id_coded"],
             F.expr("try_cast(order_proc_id_coded AS BIGINT)"),
         )
         .withColumn(
-            "_culture_time",
-            F.expr(
-                "try_to_timestamp(order_time_jittered_utc, 'yyyy-MM-dd HH:mm:ssXXX')"
+            DERIVED_COLUMNS["order_time_jittered_utc"],
+            F.try_to_timestamp(
+                F.col("order_time_jittered_utc"),
+                F.lit(TIMESTAMP_FORMAT),
             ),
         )
     )
 
     # Parse the positive-culture flag explicitly.
     cleaned = cleaned.withColumn(
-        "_was_positive",
+        DERIVED_COLUMNS["was_positive"],
         F.when(F.col("was_positive") == "1", F.lit(True)).when(
             F.col("was_positive") == "0", F.lit(False)
         ),
     )
 
+    # Build rejection reasons for invalid required fields.
     rejection_reasons = F.array_compact(
         F.array(
             F.when(
@@ -95,19 +127,19 @@ def transform_cohort(
                 F.lit("missing_anon_id"),
             ),
             F.when(
-                F.col("_encounter_id").isNull(),
+                F.col(DERIVED_COLUMNS["pat_enc_csn_id_coded"]).isNull(),
                 F.lit("invalid_or_missing_encounter_id"),
             ),
             F.when(
-                F.col("_culture_order_id").isNull(),
+                F.col(DERIVED_COLUMNS["order_proc_id_coded"]).isNull(),
                 F.lit("invalid_or_missing_culture_order_id"),
             ),
             F.when(
-                F.col("_culture_time").isNull(),
+                F.col(DERIVED_COLUMNS["order_time_jittered_utc"]).isNull(),
                 F.lit("invalid_or_missing_culture_time"),
             ),
             F.when(
-                F.col("_was_positive").isNull(),
+                F.col(DERIVED_COLUMNS["was_positive"]).isNull(),
                 F.lit("invalid_or_missing_was_positive"),
             ),
         )
@@ -118,24 +150,41 @@ def transform_cohort(
         rejection_reasons,
     )
 
-    quarantine = assessed.filter(F.size(F.col("rejection_reasons")) > 0).select(
-        *[F.col(f"_raw_{column}").alias(column) for column in source.columns],
+    # Preserve original source values in quarantine.
+    quarantine = assessed.filter(
+        F.size(F.col("rejection_reasons")) > 0
+    ).select(
+        *[
+            F.col(f"_raw_{column}").alias(column)
+            for column in source.columns
+        ],
         F.col("rejection_reasons"),
     )
 
-    silver = assessed.filter(F.size(F.col("rejection_reasons")) == 0).select(
-        F.col("anon_id").cast("string").alias("anon_id"),
-        F.col("_encounter_id").alias("encounter_id"),
-        F.col("_culture_order_id").alias("culture_order_id"),
-        F.col("_culture_time").alias("culture_time"),
-        F.col("ordering_mode").alias("care_setting"),
-        F.col("culture_description").alias("culture_type"),
-        F.col("_was_positive").alias("was_positive"),
-        F.col("organism").alias("organism"),
-        F.col("antibiotic").alias("antibiotic"),
-        F.col("susceptibility").alias("susceptibility"),
+    # Dynamically construct the Silver output columns.
+    silver_columns = []
+
+    for source_column, silver_column in SOURCE_TO_SILVER.items():
+        working_column = DERIVED_COLUMNS.get(
+            source_column,
+            source_column,
+        )
+
+        expression = F.col(working_column)
+
+        if source_column in COLUMN_CASTS:
+            expression = expression.cast(COLUMN_CASTS[source_column])
+
+        silver_columns.append(
+            expression.alias(silver_column)
+        )
+
+    silver = (
+        assessed.filter(F.size(F.col("rejection_reasons")) == 0)
+        .select(*silver_columns)
     )
 
+    # Reconcile input, Silver, and quarantine row counts.
     input_rows = source.count()
     output_rows = silver.count()
     quarantined_rows = quarantine.count()
@@ -147,6 +196,7 @@ def transform_cohort(
             f"quarantined={quarantined_rows}"
         )
 
+    # Collect transformation metrics.
     metrics = {
         "input_rows": input_rows,
         "output_rows": output_rows,
