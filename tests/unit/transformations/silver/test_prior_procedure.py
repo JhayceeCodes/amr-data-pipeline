@@ -8,7 +8,6 @@ from amr_pipeline.transformations.silver.prior_procedure import (
     transform_prior_procedures,
 )
 
-
 SCHEMA = T.StructType(
     [
         T.StructField("anon_id", T.StringType(), True),
@@ -164,9 +163,7 @@ def prior_procedure_source(spark):
 
 
 def test_transforms_valid_and_invalid_records(prior_procedure_source):
-    silver, quarantine, metrics = transform_prior_procedures(
-        prior_procedure_source
-    )
+    silver, quarantine, metrics = transform_prior_procedures(prior_procedure_source)
 
     assert silver.count() == 8
     assert quarantine.count() == 7
@@ -177,10 +174,7 @@ def test_transforms_valid_and_invalid_records(prior_procedure_source):
     assert metrics["invalid_intervals"] == 1
     assert metrics["negative_intervals"] == 1
 
-    assert (
-        metrics["output_rows"] + metrics["quarantined_rows"]
-        == metrics["input_rows"]
-    )
+    assert metrics["output_rows"] + metrics["quarantined_rows"] == metrics["input_rows"]
 
 
 def test_output_schema_has_expected_types(prior_procedure_source):
@@ -195,9 +189,7 @@ def test_output_schema_has_expected_types(prior_procedure_source):
         ("days_since_prior_procedure", T.IntegerType()),
     ]
 
-    actual_schema = [
-        (field.name, field.dataType) for field in silver.schema.fields
-    ]
+    actual_schema = [(field.name, field.dataType) for field in silver.schema.fields]
 
     assert actual_schema == expected_schema
 
@@ -205,9 +197,7 @@ def test_output_schema_has_expected_types(prior_procedure_source):
 def test_casts_identifiers_timestamp_and_interval(prior_procedure_source):
     silver, _, _ = transform_prior_procedures(prior_procedure_source)
 
-    record = silver.filter(
-        F.col("days_since_prior_procedure") == 640
-    ).first()
+    record = silver.filter(F.col("days_since_prior_procedure") == 640).first()
 
     assert record is not None
     assert record["anon_id"] == "JC862464"
@@ -253,9 +243,7 @@ def test_retains_invalid_interval_as_null_and_tracks_metric(
 ):
     silver, _, metrics = transform_prior_procedures(prior_procedure_source)
 
-    record = silver.filter(
-        F.col("anon_id") == "JC862469"
-    ).first()
+    record = silver.filter(F.col("anon_id") == "JC862469").first()
 
     assert record is not None
     assert record["days_since_prior_procedure"] is None
@@ -265,9 +253,7 @@ def test_retains_invalid_interval_as_null_and_tracks_metric(
 def test_retains_missing_optional_interval(prior_procedure_source):
     silver, _, metrics = transform_prior_procedures(prior_procedure_source)
 
-    record = silver.filter(
-        F.col("anon_id") == "JC862470"
-    ).first()
+    record = silver.filter(F.col("anon_id") == "JC862470").first()
 
     assert record is not None
     assert record["days_since_prior_procedure"] is None
@@ -279,9 +265,7 @@ def test_retains_missing_optional_interval(prior_procedure_source):
 def test_retains_zero_interval_without_negative_metric(prior_procedure_source):
     silver, _, metrics = transform_prior_procedures(prior_procedure_source)
 
-    record = silver.filter(
-        F.col("anon_id") == "JC862473"
-    ).first()
+    record = silver.filter(F.col("anon_id") == "JC862473").first()
 
     assert record is not None
     assert record["days_since_prior_procedure"] == 0
@@ -289,22 +273,16 @@ def test_retains_zero_interval_without_negative_metric(prior_procedure_source):
 
 
 def test_converts_literal_null_placeholders(prior_procedure_source):
-    silver, quarantine, metrics = transform_prior_procedures(
-        prior_procedure_source
-    )
+    silver, quarantine, metrics = transform_prior_procedures(prior_procedure_source)
 
     # Optional interval placeholder becomes SQL NULL; retain the row.
-    optional_record = silver.filter(
-        F.col("anon_id") == "JC862471"
-    ).first()
+    optional_record = silver.filter(F.col("anon_id") == "JC862471").first()
 
     assert optional_record is not None
     assert optional_record["days_since_prior_procedure"] is None
 
     # Required procedure placeholder becomes SQL NULL and is quarantined.
-    required_record = quarantine.filter(
-        F.col("anon_id") == "JC862472"
-    ).first()
+    required_record = quarantine.filter(F.col("anon_id") == "JC862472").first()
 
     assert required_record is not None
     assert required_record["procedure_description"] == "Null"
@@ -315,9 +293,7 @@ def test_converts_literal_null_placeholders(prior_procedure_source):
 def test_quarantines_missing_procedure_name(prior_procedure_source):
     _, quarantine, _ = transform_prior_procedures(prior_procedure_source)
 
-    record = quarantine.filter(
-        F.col("anon_id") == "JC862468"
-    ).first()
+    record = quarantine.filter(F.col("anon_id") == "JC862468").first()
 
     assert record is not None
     assert "missing_procedure_name" in record["rejection_reasons"]
@@ -326,9 +302,7 @@ def test_quarantines_missing_procedure_name(prior_procedure_source):
 def test_quarantines_missing_patient_id(prior_procedure_source):
     _, quarantine, _ = transform_prior_procedures(prior_procedure_source)
 
-    record = quarantine.filter(
-        F.col("order_proc_id_coded") == "775667820"
-    ).first()
+    record = quarantine.filter(F.col("order_proc_id_coded") == "775667820").first()
 
     assert record is not None
     assert "missing_anon_id" in record["rejection_reasons"]
@@ -337,75 +311,51 @@ def test_quarantines_missing_patient_id(prior_procedure_source):
 def test_quarantines_invalid_encounter_id(prior_procedure_source):
     _, quarantine, _ = transform_prior_procedures(prior_procedure_source)
 
-    record = quarantine.filter(
-        F.col("anon_id") == "JC862465"
-    ).first()
+    record = quarantine.filter(F.col("anon_id") == "JC862465").first()
 
     assert record is not None
-    assert (
-        "invalid_or_missing_encounter_id"
-        in record["rejection_reasons"]
-    )
+    assert "invalid_or_missing_encounter_id" in record["rejection_reasons"]
 
 
 def test_quarantines_invalid_culture_order_id(prior_procedure_source):
     _, quarantine, _ = transform_prior_procedures(prior_procedure_source)
 
-    record = quarantine.filter(
-        F.col("anon_id") == "JC862466"
-    ).first()
+    record = quarantine.filter(F.col("anon_id") == "JC862466").first()
 
     assert record is not None
-    assert (
-        "invalid_or_missing_culture_order_id"
-        in record["rejection_reasons"]
-    )
+    assert "invalid_or_missing_culture_order_id" in record["rejection_reasons"]
 
 
 def test_quarantines_invalid_timestamp(prior_procedure_source):
     _, quarantine, _ = transform_prior_procedures(prior_procedure_source)
 
-    record = quarantine.filter(
-        F.col("anon_id") == "JC862467"
-    ).first()
+    record = quarantine.filter(F.col("anon_id") == "JC862467").first()
 
     assert record is not None
-    assert (
-        "invalid_or_missing_culture_time"
-        in record["rejection_reasons"]
-    )
+    assert "invalid_or_missing_culture_time" in record["rejection_reasons"]
 
 
 def test_records_multiple_rejection_reasons(prior_procedure_source):
     _, quarantine, _ = transform_prior_procedures(prior_procedure_source)
 
-    record = quarantine.filter(
-        F.col("order_proc_id_coded") == "775667830"
-    ).first()
+    record = quarantine.filter(F.col("order_proc_id_coded") == "775667830").first()
 
     assert record is not None
     assert "missing_anon_id" in record["rejection_reasons"]
-    assert (
-        "invalid_or_missing_encounter_id"
-        in record["rejection_reasons"]
-    )
+    assert "invalid_or_missing_encounter_id" in record["rejection_reasons"]
 
 
 def test_preserves_original_values_in_quarantine(prior_procedure_source):
     _, quarantine, _ = transform_prior_procedures(prior_procedure_source)
 
-    record = quarantine.filter(
-        F.col("anon_id") == "JC862465"
-    ).first()
+    record = quarantine.filter(F.col("anon_id") == "JC862465").first()
 
     assert record is not None
     assert record["pat_enc_csn_id_coded"] == "invalid"
 
 
 def test_fails_when_required_source_column_is_missing(prior_procedure_source):
-    source_without_procedure = prior_procedure_source.drop(
-        "procedure_description"
-    )
+    source_without_procedure = prior_procedure_source.drop("procedure_description")
 
     with pytest.raises((ValueError, KeyError)):
         transform_prior_procedures(source_without_procedure)
