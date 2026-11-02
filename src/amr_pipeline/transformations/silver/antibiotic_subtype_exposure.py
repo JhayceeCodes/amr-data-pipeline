@@ -1,4 +1,3 @@
-
 """Silver transformation for antibiotic subtype exposure records."""
 
 from pyspark.sql import DataFrame
@@ -20,14 +19,6 @@ SOURCE_TO_SILVER = {
 
 REQUIRED_COLUMNS = set(SOURCE_TO_SILVER)
 
-# Required values for a record to enter Silver.
-REQUIRED_FIELDS = {
-    "anon_id",
-    "pat_enc_csn_id_coded",
-    "order_proc_id_coded",
-    "order_time_jittered_utc",
-}
-
 
 def transform_antibiotic_subtype_exposure(
     source: DataFrame,
@@ -46,9 +37,7 @@ def transform_antibiotic_subtype_exposure(
 
     # Count exact placeholders in one aggregation before normalization.
     placeholder_expressions = [
-        F.sum(
-            F.when(F.col(column) == "Null", 1).otherwise(0)
-        ).alias(column)
+        F.sum(F.when(F.col(column) == "Null", 1).otherwise(0)).alias(column)
         for column in source_columns
     ]
 
@@ -73,9 +62,7 @@ def transform_antibiotic_subtype_exposure(
     for column in source_columns:
         cleaned = cleaned.withColumn(
             column,
-            F.when(F.col(column) == "Null", F.lit(None)).otherwise(
-                F.col(column)
-            ),
+            F.when(F.col(column) == "Null", F.lit(None)).otherwise(F.col(column)),
         )
 
     # Safely parse identifiers, timestamp, and interval.
@@ -140,10 +127,7 @@ def transform_antibiotic_subtype_exposure(
 
     # Retain original values for rejected records.
     quarantine = assessed.filter(~valid_condition).select(
-        *[
-            F.col(f"_raw_{column}").alias(column)
-            for column in source_columns
-        ],
+        *[F.col(f"_raw_{column}").alias(column) for column in source_columns],
         F.col("rejection_reasons"),
     )
 
@@ -154,9 +138,7 @@ def transform_antibiotic_subtype_exposure(
                 "pat_enc_csn_id_coded": "_encounter_id",
                 "order_proc_id_coded": "_culture_order_id",
                 "order_time_jittered_utc": "_culture_time",
-                "medication_time_to_cultureTime": (
-                    "_days_since_prior_medication"
-                ),
+                "medication_time_to_cultureTime": ("_days_since_prior_medication"),
             }.get(source_column, source_column)
         ).alias(silver_column)
         for source_column, silver_column in SOURCE_TO_SILVER.items()
@@ -168,15 +150,9 @@ def transform_antibiotic_subtype_exposure(
     metric_row = assessed.agg(
         F.count("*").alias("input_rows"),
         F.sum(F.when(valid_condition, 1).otherwise(0)).alias("output_rows"),
-        F.sum(F.when(~valid_condition, 1).otherwise(0)).alias(
-            "quarantined_rows"
-        ),
-        F.sum(F.when(invalid_interval, 1).otherwise(0)).alias(
-            "invalid_intervals"
-        ),
-        F.sum(F.when(negative_interval, 1).otherwise(0)).alias(
-            "negative_intervals"
-        ),
+        F.sum(F.when(~valid_condition, 1).otherwise(0)).alias("quarantined_rows"),
+        F.sum(F.when(invalid_interval, 1).otherwise(0)).alias("invalid_intervals"),
+        F.sum(F.when(negative_interval, 1).otherwise(0)).alias("negative_intervals"),
     ).first()
 
     input_rows = int(metric_row["input_rows"] or 0)
@@ -196,9 +172,7 @@ def transform_antibiotic_subtype_exposure(
         "quarantined_rows": quarantined_rows,
         "invalid_intervals": int(metric_row["invalid_intervals"] or 0),
         "negative_intervals": int(metric_row["negative_intervals"] or 0),
-        "null_placeholders_converted_total": sum(
-            placeholder_metrics.values()
-        ),
+        "null_placeholders_converted_total": sum(placeholder_metrics.values()),
         **{
             f"null_placeholders_converted.{column}": count
             for column, count in placeholder_metrics.items()

@@ -1,7 +1,6 @@
 from pyspark.sql import DataFrame
 from pyspark.sql import functions as F
 
-
 TIMESTAMP_FORMAT = "yyyy-MM-dd HH:mm:ssXXX"
 
 SOURCE_TO_SILVER = {
@@ -41,9 +40,7 @@ def transform_antibiotic_class_exposure(
     """
     missing_columns = REQUIRED_COLUMNS - set(source.columns)
     if missing_columns:
-        raise ValueError(
-            f"Missing required source columns: {sorted(missing_columns)}"
-        )
+        raise ValueError(f"Missing required source columns: {sorted(missing_columns)}")
 
     input_rows = source.count()
 
@@ -56,8 +53,7 @@ def transform_antibiotic_class_exposure(
 
         normalized = normalized.withColumn(
             column,
-            F.when(F.col(column) == "Null", F.lit(None))
-            .otherwise(F.col(column)),
+            F.when(F.col(column) == "Null", F.lit(None)).otherwise(F.col(column)),
         )
 
     # Retain original values for quarantine investigation.
@@ -70,33 +66,42 @@ def transform_antibiotic_class_exposure(
     # Build parsed fields without modifying the retained raw values.
     parsed = normalized
 
-    parsed = parsed.withColumn(
-        "anon_id",
-        F.col("_raw_anon_id"),
-    ).withColumn(
-        "encounter_id",
-        F.expr("try_cast(_raw_pat_enc_csn_id_coded AS BIGINT)"),
-    ).withColumn(
-        "culture_order_id",
-        F.expr("try_cast(_raw_order_proc_id_coded AS BIGINT)"),
-    ).withColumn(
-        "culture_time",
-        F.try_to_timestamp(
-            F.col("_raw_order_time_jittered_utc"),
-            F.lit(TIMESTAMP_FORMAT),
-        ),
-    ).withColumn(
-        "med_category",
-        F.col("_raw_medication_category"),
-    ).withColumn(
-        "medication",
-        F.col("_raw_medication_name"),
-    ).withColumn(
-        "antibiotic_class",
-        F.col("_raw_antibiotic_class"),
-    ).withColumn(
-        "days_before_culture",
-        F.expr("try_cast(_raw_time_to_culturetime AS INT)"),
+    parsed = (
+        parsed.withColumn(
+            "anon_id",
+            F.col("_raw_anon_id"),
+        )
+        .withColumn(
+            "encounter_id",
+            F.expr("try_cast(_raw_pat_enc_csn_id_coded AS BIGINT)"),
+        )
+        .withColumn(
+            "culture_order_id",
+            F.expr("try_cast(_raw_order_proc_id_coded AS BIGINT)"),
+        )
+        .withColumn(
+            "culture_time",
+            F.try_to_timestamp(
+                F.col("_raw_order_time_jittered_utc"),
+                F.lit(TIMESTAMP_FORMAT),
+            ),
+        )
+        .withColumn(
+            "med_category",
+            F.col("_raw_medication_category"),
+        )
+        .withColumn(
+            "medication",
+            F.col("_raw_medication_name"),
+        )
+        .withColumn(
+            "antibiotic_class",
+            F.col("_raw_antibiotic_class"),
+        )
+        .withColumn(
+            "days_before_culture",
+            F.expr("try_cast(_raw_time_to_culturetime AS INT)"),
+        )
     )
 
     # Required-field validation. Optional exposure fields are not required
@@ -123,13 +128,9 @@ def transform_antibiotic_class_exposure(
         rejection_reasons,
     )
 
-    quarantine = classified.filter(
-        F.size("rejection_reasons") > 0
-    )
+    quarantine = classified.filter(F.size("rejection_reasons") > 0)
 
-    valid = classified.filter(
-        F.size("rejection_reasons") == 0
-    )
+    valid = classified.filter(F.size("rejection_reasons") == 0)
 
     silver_columns = [
         "anon_id",
@@ -149,9 +150,7 @@ def transform_antibiotic_class_exposure(
         & F.col("days_before_culture").isNull()
     ).count()
 
-    negative_intervals = valid.filter(
-        F.col("days_before_culture") < 0
-    ).count()
+    negative_intervals = valid.filter(F.col("days_before_culture") < 0).count()
 
     output_rows = silver.count()
     quarantined_rows = quarantine.count()
@@ -162,9 +161,7 @@ def transform_antibiotic_class_exposure(
         "quarantined_rows": quarantined_rows,
         "invalid_intervals": invalid_intervals,
         "negative_intervals": negative_intervals,
-        "null_placeholders_converted_total": sum(
-            placeholder_counts.values()
-        ),
+        "null_placeholders_converted_total": sum(placeholder_counts.values()),
         "null_placeholders_converted_by_column": placeholder_counts,
     }
 

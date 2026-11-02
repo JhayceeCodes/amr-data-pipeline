@@ -1,11 +1,9 @@
-
 import pytest
 from pyspark.sql import types as T
 
 from amr_pipeline.transformations.silver.antibiotic_subtype_exposure import (
     transform_antibiotic_subtype_exposure,
 )
-
 
 SCHEMA = T.StructType(
     [
@@ -99,9 +97,7 @@ def test_preserves_repeated_exposure_records_with_different_intervals(spark):
 
     assert silver.count() == 2
     assert quarantine.count() == 0
-    assert {
-        row.days_since_prior_medication for row in silver.collect()
-    } == {43, 48}
+    assert {row.days_since_prior_medication for row in silver.collect()} == {43, 48}
     assert metrics["input_rows"] == 2
     assert metrics["output_rows"] == 2
 
@@ -122,9 +118,7 @@ def test_preserves_records_with_different_subtype_categories(spark):
 
     assert silver.count() == 2
     assert quarantine.count() == 0
-    assert {
-        row.subtype_category for row in silver.collect()
-    } == {"CEP12", "CEP13"}
+    assert {row.subtype_category for row in silver.collect()} == {"CEP12", "CEP13"}
 
 
 def test_does_not_deduplicate_identical_source_records(spark):
@@ -259,10 +253,7 @@ def test_converts_exact_null_placeholders_to_sql_null(spark):
     assert metrics["null_placeholders_converted.medication_category"] == 1
     assert metrics["null_placeholders_converted.medication_name"] == 1
     assert metrics["null_placeholders_converted.antibiotic_subtype"] == 1
-    assert (
-        metrics["null_placeholders_converted.antibiotic_subtype_category"]
-        == 1
-    )
+    assert metrics["null_placeholders_converted.antibiotic_subtype_category"] == 1
 
 
 def test_preserves_optional_missing_values(spark):

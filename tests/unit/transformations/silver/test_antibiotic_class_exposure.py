@@ -1,11 +1,9 @@
-
 import pytest
 from pyspark.sql import types as T
 
 from amr_pipeline.transformations.silver.antibiotic_class_exposure import (
     transform_antibiotic_class_exposure,
 )
-
 
 SCHEMA = T.StructType(
     [
@@ -98,9 +96,7 @@ def test_preserves_repeated_exposure_records_with_different_intervals(spark):
 
     assert silver.count() == 2
     assert quarantine.count() == 0
-    assert {
-        row.days_before_culture for row in silver.collect()
-    } == {43, 48}
+    assert {row.days_before_culture for row in silver.collect()} == {43, 48}
     assert metrics["input_rows"] == 2
     assert metrics["output_rows"] == 2
 
@@ -223,15 +219,9 @@ def test_converts_exact_null_placeholders_to_sql_null(spark):
     assert row.medication is None
     assert row.antibiotic_class is None
 
-    assert metrics["null_placeholders_converted_by_column"][
-        "medication_category"
-    ] == 1
-    assert metrics["null_placeholders_converted_by_column"][
-        "medication_name"
-    ] == 1
-    assert metrics["null_placeholders_converted_by_column"][
-        "antibiotic_class"
-    ] == 1
+    assert metrics["null_placeholders_converted_by_column"]["medication_category"] == 1
+    assert metrics["null_placeholders_converted_by_column"]["medication_name"] == 1
+    assert metrics["null_placeholders_converted_by_column"]["antibiotic_class"] == 1
 
 
 def test_preserves_optional_missing_values(spark):

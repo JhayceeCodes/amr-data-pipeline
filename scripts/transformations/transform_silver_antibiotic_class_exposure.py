@@ -10,18 +10,14 @@ from amr_pipeline.transformations.silver.antibiotic_class_exposure import (
     transform_antibiotic_class_exposure,
 )
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 SOURCE_PATH = (
-    PROJECT_ROOT
-    / "data/bronze/parquet/microbiology_cultures_antibiotic_class_exposure"
+    PROJECT_ROOT / "data/bronze/parquet/microbiology_cultures_antibiotic_class_exposure"
 )
 
 SILVER_PATH = PROJECT_ROOT / "data/silver/antibiotic_class_exposure"
-QUARANTINE_PATH = (
-    PROJECT_ROOT / "data/silver/quarantine/antibiotic_class_exposure"
-)
+QUARANTINE_PATH = PROJECT_ROOT / "data/silver/quarantine/antibiotic_class_exposure"
 STAGING_ROOT = PROJECT_ROOT / "data/silver/_staging"
 RUNS_PATH = PROJECT_ROOT / "data/silver/runs"
 
@@ -48,9 +44,7 @@ def main() -> None:
     )
 
     if not SOURCE_PATH.exists():
-        raise FileNotFoundError(
-            f"Bronze dataset not found: {SOURCE_PATH}"
-        )
+        raise FileNotFoundError(f"Bronze dataset not found: {SOURCE_PATH}")
 
     # Prevent accidental replacement of an existing published dataset.
     if SILVER_PATH.exists() or QUARANTINE_PATH.exists():
@@ -77,30 +71,21 @@ def main() -> None:
 
         source = spark.read.parquet(str(SOURCE_PATH))
 
-        silver, quarantine, metrics = (
-            transform_antibiotic_class_exposure(source)
-        )
+        silver, quarantine, metrics = transform_antibiotic_class_exposure(source)
 
         staging_run.mkdir(parents=True, exist_ok=False)
 
         silver.write.mode("errorifexists").parquet(str(staged_silver))
-        quarantine.write.mode("errorifexists").parquet(
-            str(staged_quarantine)
-        )
+        quarantine.write.mode("errorifexists").parquet(str(staged_quarantine))
 
         # Validate persisted output rather than relying only on in-memory
         # counts.
-        persisted_silver_count = spark.read.parquet(
-            str(staged_silver)
-        ).count()
+        persisted_silver_count = spark.read.parquet(str(staged_silver)).count()
 
-        persisted_quarantine_count = spark.read.parquet(
-            str(staged_quarantine)
-        ).count()
+        persisted_quarantine_count = spark.read.parquet(str(staged_quarantine)).count()
 
         reconciliation_passed = (
-            metrics["input_rows"]
-            == persisted_silver_count + persisted_quarantine_count
+            metrics["input_rows"] == persisted_silver_count + persisted_quarantine_count
             and persisted_silver_count == metrics["output_rows"]
             and persisted_quarantine_count == metrics["quarantined_rows"]
         )
@@ -115,9 +100,7 @@ def main() -> None:
 
         # Recheck immediately before publishing.
         if SILVER_PATH.exists() or QUARANTINE_PATH.exists():
-            raise FileExistsError(
-                "An output destination appeared before publication."
-            )
+            raise FileExistsError("An output destination appeared before publication.")
 
         SILVER_PATH.parent.mkdir(parents=True, exist_ok=True)
         QUARANTINE_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -133,7 +116,7 @@ def main() -> None:
 
         report = {
             "run_id": run_id,
-            "dataset": "antibiotic_class_exposure",
+            "transformation": "silver_antibiotic_class_exposure",
             "status": "success",
             "started_at": started_at.isoformat(),
             "completed_at": completed_at.isoformat(),
