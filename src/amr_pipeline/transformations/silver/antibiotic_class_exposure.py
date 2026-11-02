@@ -26,13 +26,6 @@ REQUIRED_COLUMNS = {
     "time_to_culturetime",
 }
 
-REQUIRED_FIELDS = {
-    "anon_id": "missing_anon_id",
-    "pat_enc_csn_id_coded": "invalid_encounter_id",
-    "order_proc_id_coded": "invalid_culture_order_id",
-    "order_time_jittered_utc": "invalid_culture_time",
-}
-
 
 def transform_antibiotic_class_exposure(
     source: DataFrame,
