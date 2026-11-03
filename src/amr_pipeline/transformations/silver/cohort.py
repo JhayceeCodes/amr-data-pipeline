@@ -1,7 +1,21 @@
-"""Silver transformation for the microbiology culture cohort."""
+"""Silver transformation for microbiology culture cohort records."""
 
-from pyspark.sql import DataFrame
+from pyspark.sql import Column, DataFrame
 from pyspark.sql import functions as F
+
+from amr_pipeline.transformations.common.casting import (
+    try_cast_bigint,
+    try_parse_timestamp,
+)
+from amr_pipeline.transformations.common.metrics import build_row_metrics
+from amr_pipeline.transformations.common.normalization import (
+    normalize_null_placeholders,
+)
+from amr_pipeline.transformations.common.quarantine import (
+    build_rejection_reasons,
+    select_quarantine_rows,
+)
+
 
 SOURCE_TO_SILVER = {
     "anon_id": "anon_id",
@@ -16,8 +30,6 @@ SOURCE_TO_SILVER = {
     "susceptibility": "susceptibility",
 }
 
-TIMESTAMP_FORMAT = "yyyy-MM-dd HH:mm:ssXXX"
-
 REQUIRED_COLUMNS = {
     "anon_id",
     "pat_enc_csn_id_coded",
@@ -26,7 +38,6 @@ REQUIRED_COLUMNS = {
     "was_positive",
 }
 
-# Source fields that require parsing or type conversion.
 DERIVED_COLUMNS = {
     "pat_enc_csn_id_coded": "_encounter_id",
     "order_proc_id_coded": "_culture_order_id",
@@ -34,166 +45,142 @@ DERIVED_COLUMNS = {
     "was_positive": "_was_positive",
 }
 
-# Explicit output types for fields that need casting.
-COLUMN_CASTS = {
-    "anon_id": "string",
+REQUIRED_FIELDS = {
+    "anon_id": "missing_anon_id",
+    "pat_enc_csn_id_coded": "invalid_encounter_id",
+    "order_proc_id_coded": "invalid_culture_order_id",
+    "order_time_jittered_utc": "invalid_culture_time",
+    "was_positive": "invalid_was_positive",
 }
+
+SILVER_COLUMNS = list(SOURCE_TO_SILVER.values())
+
+
+def _is_invalid_boolean(column: str) -> Column:
+    """Return true when a non-null value is not a supported Boolean flag."""
+    normalized = F.lower(F.trim(F.col(column)))
+
+    return (
+        F.col(column).isNull()
+        | ~normalized.isin("0", "1", "true", "false")
+    )
 
 
 def transform_cohort(
     source: DataFrame,
-) -> tuple[DataFrame, DataFrame, dict[str, int]]:
-    """Transform the Bronze cohort into clean Silver and quarantine rows."""
+) -> tuple[DataFrame, DataFrame, dict]:
+    """Transform Bronze culture cohort records into Silver and quarantine.
 
-    # Validate the source schema.
-    missing_columns = REQUIRED_COLUMNS - set(source.columns)
+    Exact ``"Null"`` placeholders are converted to SQL NULL. Required
+    identifiers, the culture timestamp, and the positive-culture flag are
+    validated. Invalid required values are quarantined with their original
+    source values and rejection reasons.
 
-    if missing_columns:
+    Optional fields are retained as NULL when missing. Distinct observations
+    are preserved; this transformation does not deduplicate source records.
+    """
+    # Validate required and mapped source columns.
+    missing_required = REQUIRED_COLUMNS - set(source.columns)
+
+    if missing_required:
         raise ValueError(
-            f"Bronze cohort is missing required columns: {sorted(missing_columns)}"
+            "Bronze cohort is missing required columns: "
+            f"{sorted(missing_required)}"
         )
 
-    # Validate that every mapped source column exists.
-    mapped_columns = set(SOURCE_TO_SILVER)
-    missing_mapped_columns = mapped_columns - set(source.columns)
+    missing_mapped = set(SOURCE_TO_SILVER) - set(source.columns)
 
-    if missing_mapped_columns:
+    if missing_mapped:
         raise ValueError(
-            f"Bronze cohort is missing mapped columns: {sorted(missing_mapped_columns)}"
+            "Bronze cohort is missing mapped columns: "
+            f"{sorted(missing_mapped)}"
         )
 
-    # Capture exact placeholder counts before replacing them.
-    placeholder_metrics = {
-        column: source.filter(F.col(column) == "Null").count()
-        for column in source.columns
-    }
+    input_rows = source.count()
 
-    placeholder_metrics = {
-        column: count for column, count in placeholder_metrics.items() if count > 0
-    }
+    # Normalize placeholders while retaining original values for quarantine.
+    # Requires normalize_null_placeholders(..., preserve_raw=True).
+    normalized, placeholder_counts = normalize_null_placeholders(
+        source,
+        preserve_raw=True,
+    )
 
-    # Retain original source values for rejected records.
-    cleaned = source
-
-    for column in source.columns:
-        cleaned = cleaned.withColumn(
-            f"_raw_{column}",
-            F.col(column),
-        )
-
-    # Convert exact "Null" placeholders to SQL NULL in working columns.
-    for column in source.columns:
-        cleaned = cleaned.withColumn(
-            column,
-            F.when(F.col(column) == "Null", F.lit(None)).otherwise(F.col(column)),
-        )
-
-    # Parse identifiers.
-    cleaned = (
-        cleaned.withColumn(
+    # Build parsed fields using the shared safe-casting helpers.
+    assessed = (
+        normalized
+        .withColumn(
             DERIVED_COLUMNS["pat_enc_csn_id_coded"],
-            F.expr("try_cast(pat_enc_csn_id_coded AS BIGINT)"),
+            try_cast_bigint("pat_enc_csn_id_coded"),
         )
         .withColumn(
             DERIVED_COLUMNS["order_proc_id_coded"],
-            F.expr("try_cast(order_proc_id_coded AS BIGINT)"),
+            try_cast_bigint("order_proc_id_coded"),
         )
         .withColumn(
             DERIVED_COLUMNS["order_time_jittered_utc"],
-            F.try_to_timestamp(
-                F.col("order_time_jittered_utc"),
-                F.lit(TIMESTAMP_FORMAT),
-            ),
+            try_parse_timestamp("order_time_jittered_utc"),
+        )
+        .withColumn(
+            DERIVED_COLUMNS["was_positive"],
+            F.when(
+                F.lower(F.trim(F.col("was_positive"))).isin("1", "true"),
+                F.lit(True),
+            )
+            .when(
+                F.lower(F.trim(F.col("was_positive"))).isin("0", "false"),
+                F.lit(False),
+            )
+            .otherwise(F.lit(None).cast("boolean")),
         )
     )
 
-    # Parse the positive-culture flag explicitly.
-    cleaned = cleaned.withColumn(
-        DERIVED_COLUMNS["was_positive"],
-        F.when(F.col("was_positive") == "1", F.lit(True)).when(
-            F.col("was_positive") == "0", F.lit(False)
+    # Construct rejection conditions against the parsed fields.
+    rejection_conditions = {
+        "missing_anon_id": F.col("anon_id").isNull(),
+        "invalid_or_missing_encounter_id": F.col("_encounter_id").isNull(),
+        "invalid_or_missing_culture_order_id": F.col("_culture_order_id").isNull(),
+        "invalid_or_missing_culture_time": (
+                F.col("order_time_jittered_utc").isNull()
+                | F.col("_culture_time").isNull()
         ),
-    )
-
-    # Build rejection reasons for invalid required fields.
-    rejection_reasons = F.array_compact(
-        F.array(
-            F.when(
-                F.col("anon_id").isNull(),
-                F.lit("missing_anon_id"),
-            ),
-            F.when(
-                F.col(DERIVED_COLUMNS["pat_enc_csn_id_coded"]).isNull(),
-                F.lit("invalid_or_missing_encounter_id"),
-            ),
-            F.when(
-                F.col(DERIVED_COLUMNS["order_proc_id_coded"]).isNull(),
-                F.lit("invalid_or_missing_culture_order_id"),
-            ),
-            F.when(
-                F.col(DERIVED_COLUMNS["order_time_jittered_utc"]).isNull(),
-                F.lit("invalid_or_missing_culture_time"),
-            ),
-            F.when(
-                F.col(DERIVED_COLUMNS["was_positive"]).isNull(),
-                F.lit("invalid_or_missing_was_positive"),
-            ),
-        )
-    )
-
-    assessed = cleaned.withColumn(
+        "invalid_or_missing_was_positive": _is_invalid_boolean("was_positive"),
+    }
+    assessed = assessed.withColumn(
         "rejection_reasons",
-        rejection_reasons,
+        build_rejection_reasons(rejection_conditions),
     )
 
-    # Preserve original source values in quarantine.
-    quarantine = assessed.filter(F.size(F.col("rejection_reasons")) > 0).select(
-        *[F.col(f"_raw_{column}").alias(column) for column in source.columns],
-        F.col("rejection_reasons"),
+    source_columns = list(source.columns)
+
+    quarantine = select_quarantine_rows(
+        assessed,
+        source_columns,
     )
 
-    # Dynamically construct the Silver output columns.
-    silver_columns = []
+    # Select only accepted rows and build the standardized Silver schema.
+    accepted = assessed.filter(F.size("rejection_reasons") == 0)
 
-    for source_column, silver_column in SOURCE_TO_SILVER.items():
-        working_column = DERIVED_COLUMNS.get(
-            source_column,
-            source_column,
-        )
-
-        expression = F.col(working_column)
-
-        if source_column in COLUMN_CASTS:
-            expression = expression.cast(COLUMN_CASTS[source_column])
-
-        silver_columns.append(expression.alias(silver_column))
-
-    silver = assessed.filter(F.size(F.col("rejection_reasons")) == 0).select(
-        *silver_columns
+    silver = accepted.select(
+        F.col("anon_id").cast("string").alias("anon_id"),
+        F.col("_encounter_id").cast("long").alias("encounter_id"),
+        F.col("_culture_order_id").cast("long").alias("culture_order_id"),
+        F.col("_culture_time").alias("culture_time"),
+        F.col("ordering_mode").cast("string").alias("care_setting"),
+        F.col("culture_description").cast("string").alias("culture_type"),
+        F.col("_was_positive").cast("boolean").alias("was_positive"),
+        F.col("organism").cast("string").alias("organism"),
+        F.col("antibiotic").cast("string").alias("antibiotic"),
+        F.col("susceptibility").cast("string").alias("susceptibility"),
     )
 
-    # Reconcile input, Silver, and quarantine row counts.
-    input_rows = source.count()
     output_rows = silver.count()
     quarantined_rows = quarantine.count()
 
-    if input_rows != output_rows + quarantined_rows:
-        raise RuntimeError(
-            "Cohort row reconciliation failed: "
-            f"input={input_rows}, output={output_rows}, "
-            f"quarantined={quarantined_rows}"
-        )
-
-    # Collect transformation metrics.
-    metrics = {
-        "input_rows": input_rows,
-        "output_rows": output_rows,
-        "quarantined_rows": quarantined_rows,
-        "null_placeholders_converted_total": sum(placeholder_metrics.values()),
-        **{
-            f"null_placeholders_converted.{column}": count
-            for column, count in placeholder_metrics.items()
-        },
-    }
+    metrics = build_row_metrics(
+        input_rows=input_rows,
+        output_rows=output_rows,
+        quarantined_rows=quarantined_rows,
+        null_placeholders_converted=placeholder_counts,
+    )
 
     return silver, quarantine, metrics

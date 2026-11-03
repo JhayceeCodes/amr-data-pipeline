@@ -87,9 +87,9 @@ def test_converts_exact_null_placeholders(spark, cohort_rows):
     assert first.organism is None
     assert first.antibiotic is None
     assert first.susceptibility is None
-    assert metrics["null_placeholders_converted.organism"] == 2
-    assert metrics["null_placeholders_converted.antibiotic"] == 2
-    assert metrics["null_placeholders_converted.susceptibility"] == 2
+    assert metrics["null_placeholders_converted"]["organism"] == 2
+    assert metrics["null_placeholders_converted"]["antibiotic"] == 2
+    assert metrics["null_placeholders_converted"]["susceptibility"] == 2
 
 
 def test_converts_positive_flag_to_boolean(spark, cohort_rows):
